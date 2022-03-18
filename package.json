@@ -1,6 +1,6 @@
 {
   "name": "shared-event-log",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Event log shared betweeen two peers with deterministic references",
   "main": "index.js",
   "scripts": {
