@@ -200,13 +200,13 @@ module.exports = class OpLog extends Readable {
   clock () {
     return {
       key: this.local.key,
-      remote: this.remote.length,
+      remote: this.remote ? this.remote.length : 0,
       local: this.local.length
     }
   }
 }
 
-// yolo encoding
+// yolo json encoding
 function decode (o) {
   if (o instanceof Uint8Array) return decode(JSON.parse(o))
   if (o == null) return null
