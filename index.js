@@ -36,7 +36,7 @@ module.exports = class OpLog extends Readable {
     this.remote = this.store.get(remoteFeedKey)
     await this.remote.ready()
 
-    this.emit('open')
+    this.emit('live')
     this._opened = true
 
     this._listen()
