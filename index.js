@@ -194,7 +194,11 @@ module.exports = class OpLog extends Readable {
   _appendBatch () {
     const batch = this._queue
     this._queue = []
-    return this.local.append(batch)
+    return this.local.append(batch).then(() => {
+      for (const data of batch) {
+        this.emit('data', decode(JSON.parse(data)))
+      }
+    })
   }
 
   clock () {
