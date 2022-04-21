@@ -210,15 +210,16 @@ module.exports = class OpLog extends Readable {
 function decode (o) {
   if (o instanceof Uint8Array) return decode(JSON.parse(o))
   if (o == null) return null
+  if (Array.isArray(o)) return o.map(decode)
+  if (o && o.type === 'Buffer') return Buffer.from(o.data)
 
   const ret = {}
   for (const [k, v] of Object.entries(o)) {
     if (typeof v === 'object') {
       if (v == null) continue
-      if (v && v.type === 'Buffer') {
-        ret[k] = Buffer.from(v.data)
-      } else ret[k] = decode(v)
+      ret[k] = decode(v)
     } else ret[k] = v
   }
+
   return ret
 }
