@@ -178,6 +178,13 @@ module.exports = class OpLog extends Readable {
     return feed.get(clock.local)
   }
 
+  async _enqueue (data) {
+    return new Promise((resolve, reject) => {
+      this._queue.push({ data, promise: { resolve, reject } })
+      this._append()
+    })
+  }
+
   async append (type, data) {
     if (!this._opened) return // for testing
 
@@ -187,16 +194,18 @@ module.exports = class OpLog extends Readable {
       clock: this.clock()
     }
 
-    this._queue.push(JSON.stringify(entry))
-    return this._append()
+    return this._enqueue(JSON.stringify(entry))
   }
 
   _appendBatch () {
     const batch = this._queue
     this._queue = []
-    return this.local.append(batch).then(() => {
-      for (const data of batch) {
-        this.emit('data', decode(JSON.parse(data)))
+
+    let seq = this.local.length
+
+    return this.local.append(batch.map(e => e.data)).then(() => {
+      for (const { promise } of batch) {
+        promise.resolve(seq++)
       }
     })
   }
