@@ -206,7 +206,7 @@ module.exports = class OpLog extends Readable {
 
     await this._enqueue(JSON.stringify(entry))
 
-    return entry.eventId
+    return entry.eventId // should we return seq as well?
   }
 
   _appendBatch () {
