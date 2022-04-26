@@ -1,6 +1,7 @@
 const { Readable } = require('streamx')
 const Corestore = require('corestore')
 const debounceify = require('debounceify')
+const Accumulator = require('accumulator-hash')
 
 module.exports = class OpLog extends Readable {
   constructor (id, opts) {
@@ -27,6 +28,8 @@ module.exports = class OpLog extends Readable {
     this._append = debounceify(this._appendBatch.bind(this))
 
     this.buffer = []
+
+    this._acc = new Accumulator()
   }
 
   async loadRemote (remoteFeedKey) {
@@ -123,6 +126,10 @@ module.exports = class OpLog extends Readable {
     }
   }
 
+  hash (data) {
+    return this._acc.hash(data)
+  }
+
   compare (a, b) {
     if (!a) return 1
     if (!b) return -1
@@ -194,7 +201,12 @@ module.exports = class OpLog extends Readable {
       clock: this.clock()
     }
 
-    return this._enqueue(JSON.stringify(entry))
+    const details = Buffer.from(JSON.stringify(entry))
+    entry.eventId = this.hash(details)
+
+    await this._enqueue(JSON.stringify(entry))
+
+    return entry.eventId // should we return seq as well?
   }
 
   _appendBatch () {
