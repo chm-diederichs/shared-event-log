@@ -1,7 +1,7 @@
-const sodium = require('sodium-native')
 const { Readable } = require('streamx')
 const Corestore = require('corestore')
 const debounceify = require('debounceify')
+const Accumulator = require('accumulator-hash')
 
 module.exports = class OpLog extends Readable {
   constructor (id, opts) {
@@ -23,13 +23,13 @@ module.exports = class OpLog extends Readable {
     this.applying = null
 
     this.log = this.store.get({ name: 'log' })
-    this.hash = Buffer.alloc(32)
 
     this._queue = []
     this._append = debounceify(this._appendBatch.bind(this))
 
     this.buffer = []
-    this._hashQueue = [] // TODO use fifo
+
+    this._acc = new Accumulator()
   }
 
   async loadRemote (remoteFeedKey) {
@@ -126,30 +126,8 @@ module.exports = class OpLog extends Readable {
     }
   }
 
-  _hash (data) {
-    return new Promise((resolve, reject) => {
-      this._hashQueue.push({ data, resolve, reject })
-      this._hashLoop()
-    })
-  }
-
-  async _hashLoop () {
-    if (this._hashing) return
-    this._hashing = true
-
-    while (this._hashQueue.length) {
-      const { data, resolve } = this._hashQueue.shift()
-      const hash = Buffer.alloc(32)
-
-      sodium.crypto_generichash(buffer, data)
-      xor(hash, this.hash)
-
-      this.hash.set(hash)
-
-      resolve(hash)
-    }
-
-    this._hashing = false
+  hash (data) {
+    return this._acc.hash(data)
   }
 
   compare (a, b) {
@@ -224,7 +202,7 @@ module.exports = class OpLog extends Readable {
     }
 
     const details = Buffer.from(JSON.stringify(entry))
-    entry.eventId = await this._hash(details)
+    entry.eventId = this.hash(details)
 
     await this._enqueue(JSON.stringify(entry))
 
@@ -269,13 +247,4 @@ function decode (o) {
   }
 
   return ret
-}
-
-// in place xor
-function xor (a, b) {
-  for (let i = 0; i < a.byteLength; i++) {
-    a[i] ^= b[i]
-  }
-
-  return buf
 }
