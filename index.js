@@ -130,19 +130,22 @@ module.exports = class OpLog extends Readable {
     return this._acc.hash(data)
   }
 
+  // return -1 if the a is fully behind b
+  // return 0 if the clocks reference the same point
+  // return 1 if a references any updates that b doesn't
   compare (a, b) {
-    if (!a) return 1
-    if (!b) return -1
+    if (!a) return -1
+    if (!b) return 1
 
-    const same = Buffer.compare(a.key, b.key) === 0
+    const same = a.key.equals(b.key)
 
     const bLocal = b[same ? 'local' : 'remote']
     const bRemote = b[same ? 'remote' : 'local']
 
-    if (a.local < bLocal) return 1
-    if (a.local > bLocal) return -1
-    if (a.remote < bRemote) return 1
-    if (a.remote > bRemote) return -1
+    if (a.local > bLocal) return 1
+    if (a.remote > bRemote) return 1
+    if (a.local < bLocal) return -1
+    if (a.remote < bRemote) return -1
     return 0
   }
 
