@@ -58,38 +58,35 @@ module.exports = class OpLog extends Readable {
         ? this.local.key
         : this.remote.key
 
-    let [writer, reader] = [this.local, this.remote]
-    if (Buffer.compare(writersKey, this.local.key)) {
-      [writer, reader] = [reader, writer]
-    }
-
     const seq = order(start, writersKey)
     const stop = end
       ? order(end, writersKey)
       : current.apply(this, [writersKey])
 
-    let left = null // from writer's feed
-    let right = null // from reader's feed
+    let [w, r] = [this.local, this.remote]
+    if (Buffer.compare(writersKey, this.local.key)) [w, r] = [r, w]
 
-    while (true) {
-      if (!left && seq.writer < stop.writer) {
-        left = JSON.parse(await writer.get(seq.writer++))
-      }
+    const wopts = { start: seq.writer, end: stop.writer }
+    const ropts = { start: seq.reader, end: stop.reader }
 
-      if (!right && seq.reader < stop.reader) {
-        right = JSON.parse(await reader.get(seq.reader++))
-      }
+    const writer = w.createReadStream(wopts)[Symbol.asyncIterator]()
+    const reader = r.createReadStream(ropts)[Symbol.asyncIterator]()
 
-      if (left === null & right === null) break
+    let left = await writer.next()
+    let right = await reader.next()
 
-      const next = left ? (right ? compare(left.clock, right.clock) : 1) : -1
+    while (!left.done || !right.done) {
+      const l = decode(left.value)
+      const r = decode(right.value)
+
+      const next = left.done ? -1 : right.done ? 1 : compare(l.clock, r.clock)
 
       if (next >= 0) {
-        yield decode(left)
-        left = null
-      } else if (next <= 0) {
-        yield decode(right)
-        right = null
+        yield l
+        left = await writer.next()
+      } else if (next < 0) {
+        yield r
+        right = await reader.next()
       }
     }
 
