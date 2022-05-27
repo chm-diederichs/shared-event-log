@@ -18,6 +18,8 @@
   "homepage": "https://github.com/chm-diederichs/shared-event-log#readme",
   "dependencies": {
     "accumulator-hash": "^1.0.0",
+    "compact-encoding": "^2.7.0",
+    "compact-encoding-struct": "^1.3.0",
     "corestore": "^6.0.1-alpha.9",
     "debounceify": "^1.0.0",
     "sodium-native": "^3.3.0"

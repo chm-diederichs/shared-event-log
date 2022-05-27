@@ -2,6 +2,21 @@ const { Readable } = require('streamx')
 const Corestore = require('corestore')
 const debounceify = require('debounceify')
 const Accumulator = require('accumulator-hash')
+const c = require('compact-encoding')
+const { compile } = require('compact-encoding-struct')
+
+const clockEncoding = compile({
+  key: c.fixed32,
+  local: c.uint,
+  remote: c.uint
+})
+
+const valueEncoding = compile({
+  type: c.string,
+  clock: clockEncoding,
+  data: c.buffer,
+  eventId: c.fixed32
+})
 
 module.exports = class OpLog extends Readable {
   constructor (id, opts) {
@@ -13,7 +28,7 @@ module.exports = class OpLog extends Readable {
       ? opts.store.namespace('oplog' + this.id)
       : new Corestore(opts.storage)
 
-    this.local = this.store.get({ name: 'local' })
+    this.local = this.store.get({ name: 'local', valueEncoding })
     this.remote = null
 
     this.remoteIndex = 0
@@ -21,6 +36,8 @@ module.exports = class OpLog extends Readable {
     this._opened = false
     this.updating = false
     this.applying = null
+
+    this.dataEncoding = opts.encoding || null
 
     this.log = this.store.get({ name: 'log' })
 
@@ -36,13 +53,23 @@ module.exports = class OpLog extends Readable {
     await this.local.ready()
     await this.log.ready()
 
-    this.remote = this.store.get(remoteFeedKey)
+    this.remote = this.store.get({ key: remoteFeedKey, valueEncoding })
     await this.remote.ready()
 
     this.emit('live')
     this._opened = true
 
     this._listen()
+  }
+
+  decode (val) {
+    if (this.dataEncoding) {
+      val.data = c.decode(this.dataEncoding, val.data)
+    } else {
+      val.data = decode(val.data)
+    }
+
+    return val
   }
 
   // Get a deterministically ordered list of entries occuring between
@@ -76,16 +103,16 @@ module.exports = class OpLog extends Readable {
     let right = await reader.next()
 
     while (!left.done || !right.done) {
-      const l = decode(left.value)
-      const r = decode(right.value)
+      const l = left.done ? null : left.value
+      const r = right.done ? null : right.value
 
       const next = left.done ? -1 : right.done ? 1 : compare(l.clock, r.clock)
 
       if (next >= 0) {
-        yield l
+        yield this.decode(l)
         left = await writer.next()
       } else if (next < 0) {
-        yield r
+        yield this.decode(r)
         right = await reader.next()
       }
     }
@@ -171,7 +198,7 @@ module.exports = class OpLog extends Readable {
     async function getRemote () {
       while (this.remoteIndex < this.remote.length) {
         const block = await this.remote.get(this.remoteIndex++)
-        this.emit('data', decode(block))
+        this.emit('data', this.decode(block))
       }
     }
   }
@@ -192,8 +219,12 @@ module.exports = class OpLog extends Readable {
     })
   }
 
-  async append (type, data) {
+  async append (type, value) {
     if (!this._opened) return // for testing
+
+    const data = this.dataEncoding
+      ? c.encode(this.dataEncoding, value)
+      : Buffer.from(JSON.stringify(value))
 
     const entry = {
       type,
@@ -201,12 +232,21 @@ module.exports = class OpLog extends Readable {
       clock: this.clock()
     }
 
-    const details = Buffer.from(JSON.stringify(entry))
-    entry.eventId = this.hash(details)
-
-    await this._enqueue(JSON.stringify(entry))
+    entry.eventId = this._getEventId(entry)
+    await this._enqueue(entry)
 
     return entry.eventId // should we return seq as well?
+  }
+
+  _getEventId (details) {
+    const enc = compile({
+      type: c.string,
+      data: c.buffer,
+      clock: clockEncoding
+    })
+
+    const digest = c.encode(enc, details)
+    return this.hash(digest)
   }
 
   _appendBatch () {
