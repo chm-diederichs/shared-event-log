@@ -1,4 +1,5 @@
 const { Readable } = require('streamx')
+const sodium = require('sodium-universal')
 const Corestore = require('corestore')
 const debounceify = require('debounceify')
 const Accumulator = require('accumulator-hash')
@@ -7,10 +8,14 @@ module.exports = class OpLog extends Readable {
   constructor (id, opts) {
     super()
 
-    this.id = id
+    if (!id) {
+      const seed = Buffer.alloc(32)
+      sodium.randombytes_buf(seed)
+      id = seed.toString('hex')
+    }
 
     this.store = opts.store
-      ? opts.store.namespace('oplog' + this.id)
+      ? opts.store.namespace('oplog' + id)
       : new Corestore(opts.storage)
 
     this.local = this.store.get({ name: 'local' })
