@@ -1,5 +1,3 @@
-const { once } = require('events')
-
 module.exports = class Autochannel {
   constructor (local, remote, opts = {}) {
     this.local = local
@@ -11,8 +9,8 @@ module.exports = class Autochannel {
     this.responder = this.isInitiator ? remote : local
 
     this.prev = {
-      local: 0,
-      remote: 0
+      initiator: 0,
+      responder: 0
     }
   }
 
@@ -26,7 +24,7 @@ module.exports = class Autochannel {
 
     const entry = {
       op,
-      commitment: this.isInitiator,
+      commitment,
       remoteLength
     }
 
@@ -34,10 +32,6 @@ module.exports = class Autochannel {
   }
 
   async * accepted () {
-    const feeds = [this.local, this.remote]
-    const initiator = feeds[this.initiator ? 0 : 1]
-    const responder = feeds[this.initiator ? 1 : 0]
-
     const resp = getForwardIterator(this.responder)
     const init = this.initiator.createReadStream({ live: true })
 
@@ -46,9 +40,8 @@ module.exports = class Autochannel {
 
     let lseq = 0
     for await (const l of init) {
-      const rseq = r?.seq || 0
-      if (rseq >= l.remoteLength - 1) {
-        this.prev[this.isInitiator ? 'local' : 'remote']++
+      if ((r?.seq || 0) >= l.remoteLength - 1) {
+        this.prev.initiator++
         yield l
         continue
       }
@@ -57,40 +50,38 @@ module.exports = class Autochannel {
       while (true) {
         r = await resp.next()
         if (r.value.commitment) {
-          while (batch.length) yield batch.shift()
-          this.prev[this.isInitiator ? 'remote' : 'local'] = r.seq + 1
+          while (batch.length) {
+            this.prev.responder++
+            yield batch.shift()
+          }
         } else {
           batch.push(r.value)
         }
 
         // latest is elsewhere
         if (r.seq === l.remoteLength - 1) break
-        if (r.seq === responder.length - 1) break
+        if (r.seq === this.responder.length - 1) break
       }
 
-      while (batch.length) yield batch.shift()
-
-      if (this.isInitiator) {
-        this.prev.remote = r.seq + 1
-        this.prev.local++
-      } else {
-        this.prev.local = r.seq + 1
-        this.prev.remote++
+      while (batch.length) {
+        this.prev.responder++
+        yield batch.shift()
       }
 
+      this.prev.initiator++
       yield l
     }
   }
 
   async next (prev = this.prev) {
-    const local = getReverseIterator(this.local, prev.local)
-    const remote = getReverseIterator(this.remote, prev.remote)
+    const init = getReverseIterator(this.initiator, prev.initiator)
+    const resp = getReverseIterator(this.responder, prev.responder)
 
     const batch = []
     const heads = [[], []]
 
-    let l = await local.next()
-    let r = await remote.next()
+    let l = await init.next()
+    let r = await resp.next()
 
     while (!l.done || !r.done) {
       const lstop = (r.value?.remoteLength || 0) - 1
@@ -98,24 +89,24 @@ module.exports = class Autochannel {
 
       const [left, right] = heads
 
-      // keep going back until we get to head
+      // keep going back until we get to last seen length
       while (!l.done && l.seq > lstop) {
         left.push({
           value: l.value,
           seq: l.seq,
-          remote: false
+          remote: this.isInitiator
         })
-        l = await local.next()
+        l = await init.next()
       }
 
-      // these definitely came before l
+      // keep going back until we get to last seen length
       while (!r.done && r.seq > rstop) {
         right.push({
           value: r.value,
           seq: r.seq,
-          remote: true
+          remote: !this.isInitiator
         })
-        r = await remote.next()
+        r = await resp.next()
       }
 
       // initiator first

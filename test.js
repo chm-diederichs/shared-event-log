@@ -13,7 +13,10 @@ async function main () {
 
   await Promise.all(cores.map(c => c.ready()))
 
-  const [al, bl] = cores.sort((a, b) => Buffer.compare(a.key, b.key))
+  const A_INITIATOR = true
+
+  cores.sort((a, b) => Buffer.compare(a.key, b.key))
+  const [al, bl] = A_INITIATOR ? cores : cores.reverse()
 
   const ar = new Hypercore(() => new RAM(), bl.key, { valueEncoding: 'json' })
   const br = new Hypercore(() => new RAM(), al.key, { valueEncoding: 'json' })
@@ -31,7 +34,6 @@ async function main () {
   let bi = 0
 
   const end = start()
-  console.log('started')
 
   await a.append(ai++)
   await a.append(ai++)
@@ -59,21 +61,29 @@ async function main () {
 
   await b.append(ai++)
 
+  await new Promise(r => setTimeout(r, 1000))
+
   const ab = await a.next()
   const bb = await b.next()
 
-  // console.log(ab)
-  // console.log(bb)
-
-  console.log(a.remote.length)
+  console.log(ab)
+  console.log(bb)
 
   await end
 
   await new Promise(r => setTimeout(r, 20000))
   async function start () {
-    console.log('starting')
+    // console.log('starting')
+    startb()
     for await (const block of a.accepted()) {
-      console.log('----', block)
+      // console.log('----', block)
+    }
+  }
+
+  async function startb () {
+    // console.log('starting')
+    for await (const block of b.accepted()) {
+      // console.log('----', block)
     }
   }
 }
