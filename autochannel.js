@@ -21,16 +21,14 @@ module.exports = class Autochannel {
     await this.remote.ready()
   }
 
-  async append (op, commitment = null) {
+  async append (op, commitment = this.isInitiator) {
     const remoteLength = this.remote.length
 
     const entry = {
       op,
-      commitment,
+      commitment: this.isInitiator,
       remoteLength
     }
-
-    if (commitment) this.prev = this.clock()
 
     return this.local.append(entry)
   }
@@ -46,8 +44,11 @@ module.exports = class Autochannel {
     let r = null
     let batch = []
 
+    let lseq = 0
     for await (const l of init) {
-      if ((r?.seq || 0) >= l.remoteLength - 1) {
+      const rseq = r?.seq || 0
+      if (rseq >= l.remoteLength - 1) {
+        this.prev[this.isInitiator ? 'local' : 'remote']++
         yield l
         continue
       }
@@ -57,6 +58,7 @@ module.exports = class Autochannel {
         r = await resp.next()
         if (r.value.commitment) {
           while (batch.length) yield batch.shift()
+          this.prev[this.isInitiator ? 'remote' : 'local'] = r.seq + 1
         } else {
           batch.push(r.value)
         }
@@ -67,6 +69,14 @@ module.exports = class Autochannel {
       }
 
       while (batch.length) yield batch.shift()
+
+      if (this.isInitiator) {
+        this.prev.remote = r.seq + 1
+        this.prev.local++
+      } else {
+        this.prev.local = r.seq + 1
+        this.prev.remote++
+      }
 
       yield l
     }
@@ -108,8 +118,8 @@ module.exports = class Autochannel {
         r = await remote.next()
       }
 
-      // shortest at top
-      if (!this.initiator) heads.reverse()
+      // initiator first
+      if (!this.isInitiator) heads.reverse()
       for (const head of heads) {
         while (head.length) batch.push(head.shift())
       }
@@ -145,7 +155,7 @@ function getReverseIterator (feed, start, opts) {
   let seq = feed.length
   return {
     async next () {
-      if (seq < start || seq === 0) return { value: null, done: true }
+      if (seq <= start || seq === 0) return { value: null, done: true }
       const value = await feed.get(--seq)
       return {
         value,
