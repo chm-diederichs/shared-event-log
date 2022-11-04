@@ -1,9 +1,3 @@
-const { Readable } = require('streamx')
-const sodium = require('sodium-universal')
-const Corestore = require('corestore')
-const debounceify = require('debounceify')
-const Accumulator = require('accumulator-hash')
-
 module.exports = class Autochannel {
   constructor (local, remote, opts = {}) {
     this.local = local
@@ -31,9 +25,9 @@ module.exports = class Autochannel {
     await this.remote.ready()
   }
 
-  async append (type, data) {
+  async append (data) {
     const entry = {
-      type,
+      type: 'data',
       data,
       remoteLength: this.clock()
     }
@@ -41,84 +35,65 @@ module.exports = class Autochannel {
     return this.local.append(entry)
   }
 
-  async * requests (start = this.remoteIndex, opts = {}) {
-    if (typeof start === 'object') {
-      yield * this.requests(this.remoteIndex, start)
-    }
+  async next (prev = this.prev) {
+    const local = getSeqIterator(this.local, prev.local)
+    const remote = getSeqIterator(this.remote, prev.remote)
 
-    const str = this.remote.createReadStream({ ...opts, start })
-    for await (const data of str) {
-      yield {
-        block: decode(data),
-        seq: start++
-      }
-    }
-  }
-
-  async * read (prev = this.prev, opts) {
-    const local = getSeqIterator(this.local, prev.local, opts)
-    const remote = getSeqIterator(this.remote, prev.remote, opts)
+    const batch = []
+    const heads = [[], []]
 
     let l = await local.next()
     let r = await remote.next()
-    r.value = decode(r.value)
 
     while (!l.done || !r.done) {
-      // these definitely came before r
-      while (!l.done && l.value.remoteLength < r.seq) {
-        yield {
+      const lstop = (r.value?.remoteLength || 0) - 1
+      const rstop = (l.value?.remoteLength || 0) - 1
+
+      const [left, right] = heads
+
+      // keep going back until we get to head
+      while (!l.done && l.seq > lstop) {
+        left.push({
           value: l.value,
           seq: l.seq,
           remote: false
-        }
+        })
         l = await local.next()
       }
 
       // these definitely came before l
-      while (!r.done && r.value.remoteLength < l.seq) {
-        yield {
+      while (!r.done && r.seq > rstop) {
+        right.push({
           value: r.value,
           seq: r.seq,
           remote: true
-        }
+        })
         r = await remote.next()
-        r.value = decode(r.value)
+      }
+
+      // shortest at top
+      heads.sort((a, b) => a.length - b.length)
+      for (const head of heads) {
+        while (head.length) batch.push(head.shift())
       }
     }
 
     this.prev = {
-      local: l.seq,
-      remote: r.seq
+      local: this.local.length,
+      remote: this.remote.lengthss
     }
+
+    return batch
   }
 
-  async * commit (prev) {
-    for await (const e of this.read(prev)) {
-      if (e.value.type === 'accept') yield * this.accepted(e.value.data)
+  async commit (sig) {
+    const entry = {
+      type: 'commit',
+      sig,
+      remoteLength: this.clock()
     }
-  }
 
-  // takes series of indices
-  async accept (seq) {
-    this._pendingAccepts.add(seq)
-  }
-
-  async flush () {
-    const accepted = getRanges(this._pendingAccepts)
-    await this.append('accept', accepted)
-
-    this._pendingAccepts.clear()
-  }
-
-  async * accepted (ranges, feed = this.local) {
-    for (const [start, end] of ranges) {
-      if (start === end) yield decode(await feed.get(start))
-      else {
-        for await (const v of feed.createReadStream({ start, end })) {
-          yield decode(v)
-        }
-      }
-    }
+    return this.local.append(entry)
   }
 
   clock () {
@@ -126,42 +101,16 @@ module.exports = class Autochannel {
   }
 }
 
-function getRanges (seqs) {
-  const arr = [...seqs].sort((a, b) => a - b)
-
-  if (!arr.length) return []
-
-  let a = arr[0]
-  if (arr.length === 1) return [[a, a]]
-
-  const ranges = []
-
-  let b = arr[1]
-  let low = a
-
-  for (let i = 1; i < arr.length;) {
-    if ((b - a) > 1) {
-      ranges.push([low, a])
-      low = b
-    }
-
-    a = b
-    b = arr[i++]
-  }
-
-  ranges.push([low, b])
-  return ranges
-}
-
-function getSeqIterator (feed, seq, opts) {
-  const str = feed.createReadStream({ ...opts, start: seq })
-  const ite = str[Symbol.asyncIterator]()
-
+function getSeqIterator (feed, start, opts) {
+  let seq = feed.length
   return {
     async next () {
+      if (seq < start || seq === 0) return { value: null, done: true }
+      const value = await feed.get(--seq)
       return {
-        ...(await ite.next()),
-        seq: ++seq
+        value,
+        seq,
+        done: false
       }
     }
   }
