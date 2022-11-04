@@ -5,21 +5,11 @@ const debounceify = require('debounceify')
 const Accumulator = require('accumulator-hash')
 
 module.exports = class Autochannel {
-  constructor (id, opts = {}) {
-    if (!id) {
-      const seed = Buffer.alloc(32)
-      sodium.randombytes_buf(seed)
-      id = seed.toString('hex')
-    }
+  constructor (local, remote, opts = {}) {
+    this.local = local
+    this.remote = remote
 
-    this.store = opts.store
-      ? opts.store.namespace('oplog' + id)
-      : new Corestore(opts.storage)
-
-    this.local = this.store.get({ name: 'local', valueEncoding: 'json' })
-    this.remote = null
-
-    this.initiator = false
+    this.initiator = Buffer.compare(this.local.key, this.remote.key) < 0
 
     this.remoteIndex = opts.remoteIndex || 0
 
@@ -36,13 +26,9 @@ module.exports = class Autochannel {
     this._pendingAccepts = new Set()
   }
 
-  async loadRemote (remoteFeedKey) {
+  async ready () {
     await this.local.ready()
-
-    this.remote = this.store.get(remoteFeedKey)
     await this.remote.ready()
-
-    this.initiator = Buffer.compare(this.local.key, this.remote.key) < 0
   }
 
   async append (type, data) {
@@ -179,23 +165,4 @@ function getSeqIterator (feed, seq, opts) {
       }
     }
   }
-}
-
-// json reviver
-function decode (o) {
-  if (typeof o === 'number') return o
-  if (o instanceof Uint8Array) return decode(JSON.parse(o))
-  if (o == null) return null
-  if (Array.isArray(o)) return o.map(decode)
-  if (o && o.type === 'Buffer') return Buffer.from(o.data)
-
-  const ret = {}
-  for (const [k, v] of Object.entries(o)) {
-    if (typeof v === 'object') {
-      if (v == null) continue
-      ret[k] = decode(v)
-    } else ret[k] = v
-  }
-
-  return ret
 }
