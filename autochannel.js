@@ -49,13 +49,13 @@ module.exports = class Autochannel {
       // keep looping until we reach head
       while (true) {
         r = await resp.next()
+        batch.push(r.value)
+
         if (r.value.commitment) {
           while (batch.length) {
             this.prev.responder++
             yield batch.shift()
           }
-        } else {
-          batch.push(r.value)
         }
 
         // latest is elsewhere
