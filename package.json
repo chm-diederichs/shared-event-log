@@ -1,5 +1,5 @@
 {
-  "name": "shared-event-log",
+  "name": "autochannel",
   "version": "0.4.1",
   "description": "Event log shared betweeen two peers with deterministic references",
   "main": "index.js",
@@ -8,21 +8,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/chm-diederichs/shared-event-log.git"
+    "url": "git+https://github.com/chm-diederichs/autochannel.git"
   },
   "author": "chm-diederichs",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/chm-diederichs/shared-event-log/issues"
+    "url": "https://github.com/chm-diederichs/autochannel/issues"
   },
-  "homepage": "https://github.com/chm-diederichs/shared-event-log#readme",
-  "dependencies": {
-    "accumulator-hash": "^1.0.0",
-    "corestore": "^6.0.1-alpha.9",
-    "debounceify": "^1.0.0",
-    "sodium-universal": "^3.1.0"
-  },
+  "homepage": "https://github.com/chm-diederichs/autochannel#readme",
   "devDependencies": {
+    "hypercore": "^10.4.1",
     "random-access-memory": "^6.0.0",
     "standard": "^16.0.4"
   }
